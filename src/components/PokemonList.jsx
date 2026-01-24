@@ -22,7 +22,7 @@ async function fetchAllPokemon() {
   return data.results
 }
 
-export default function PokemonList() {
+export default function PokemonList({ initialType }) {
   const [pokemons, setPokemons] = useState([])
   const [loading, setLoading] = useState(true)
   const [limit] = useState(50)
@@ -34,13 +34,23 @@ export default function PokemonList() {
   const [selectedType, setSelectedType] = useState(null)
   const [showMoreTypes, setShowMoreTypes] = useState(false)
 
-  const load = async (nextOffset = 0, replace = false) => {
+  const load = async (nextOffset = 0, replace = false, type = null) => {
     setLoading(true)
     try {
-      const data = await fetchPokemonList(limit, nextOffset)
-      const details = await Promise.all(data.results.map((r) => fetchPokemonDetail(r.url)))
-      setPokemons((prev) => (replace ? details : [...prev, ...details]))
-      setOffset(nextOffset + limit)
+      if (type) {
+        const res = await fetch(`${API_BASE}/type/${type}`)
+        const data = await res.json()
+        const pokemonUrls = data.pokemon.map(p => p.pokemon.url)
+        const urls = pokemonUrls.slice(nextOffset, nextOffset + limit)
+        const details = await Promise.all(urls.map(url => fetchPokemonDetail(url)))
+        setPokemons((prev) => (replace ? details : [...prev, ...details]))
+        setOffset(nextOffset + limit)
+      } else {
+        const data = await fetchPokemonList(limit, nextOffset)
+        const details = await Promise.all(data.results.map((r) => fetchPokemonDetail(r.url)))
+        setPokemons((prev) => (replace ? details : [...prev, ...details]))
+        setOffset(nextOffset + limit)
+      }
     } catch (err) {
       console.error(err)
       setError('Failed to load Pokémon')
@@ -58,6 +68,13 @@ export default function PokemonList() {
     init()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (initialType !== undefined) {
+      setSelectedType(initialType)
+      load(0, true, initialType)
+    }
+  }, [initialType])
 
   const handleSearch = async (e) => {
     e.preventDefault()
@@ -80,6 +97,7 @@ export default function PokemonList() {
         setError(null)
       }
     } catch (err) {
+      console.error(err)
       setError('Failed to search')
       setPokemons([])
     } finally {
@@ -115,27 +133,24 @@ export default function PokemonList() {
             {type}
           </button>
         ))}
-        <button
-          onClick={() => setShowMoreTypes(!showMoreTypes)}
-          className="px-2 sm:px-3 py-1 rounded text-sm sm:text-base bg-indigo-600 text-white hover:bg-indigo-700"
-        >
-          {showMoreTypes ? 'Less' : 'More'}
-        </button>
+        {!showMoreTypes && (
+          <button
+            onClick={() => setShowMoreTypes(true)}
+            className="px-2 sm:px-3 py-1 rounded text-sm sm:text-base bg-indigo-600 text-white hover:bg-indigo-700"
+          >
+            More
+          </button>
+        )}
+        {showMoreTypes && ['ground', 'rock', 'psychic', 'ice', 'bug', 'ghost', 'steel', 'dragon', 'dark', 'fairy'].map(type => (
+          <button
+            key={type}
+            onClick={() => setSelectedType(type)}
+            className={`px-2 sm:px-3 py-1 rounded text-sm sm:text-base capitalize ${selectedType === type ? 'bg-yellow-400 text-slate-900' : 'bg-slate-600 text-white'}`}
+          >
+            {type}
+          </button>
+        ))}
       </div>
-
-      {showMoreTypes && (
-        <div className="mb-6 flex gap-1 sm:gap-2 flex-wrap">
-          {['ground', 'rock', 'psychic', 'ice', 'bug', 'ghost', 'steel', 'dragon', 'dark', 'fairy'].map(type => (
-            <button
-              key={type}
-              onClick={() => setSelectedType(type)}
-              className={`px-2 sm:px-3 py-1 rounded text-sm sm:text-base capitalize ${selectedType === type ? 'bg-yellow-400 text-slate-900' : 'bg-slate-600 text-white'}`}
-            >
-              {type}
-            </button>
-          ))}
-        </div>
-      )}
 
       {error && <div className="text-red-400 mb-4">{error}</div>}
 
@@ -151,7 +166,7 @@ export default function PokemonList() {
 
         <div className="mt-6 flex justify-center">
           <button
-            onClick={pokemons.length >= 200 ? () => setPokemons(pokemons.slice(0, 50)) : () => load(offset)}
+            onClick={pokemons.length >= 200 ? () => setPokemons(pokemons.slice(0, 50)) : () => load(offset, false, selectedType)}
             className="px-4 py-2 bg-yellow-400 text-slate-900 rounded"
             disabled={loading}
           >
