@@ -1,185 +1,65 @@
-import React, { useState, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import PokemonCard from './PokemonCard'
 import PokemonDetail from './PokemonDetail'
 
-const API_BASE = 'https://pokeapi.co/api/v2'
+const API = 'https://pokeapi.co/api/v2'
+const TYPES = ['all', 'normal', 'fire', 'water', 'electric', 'grass', 'ice', 'fighting', 'poison', 'ground', 'flying', 'psychic', 'bug', 'rock', 'ghost', 'dragon', 'dark', 'steel', 'fairy']
+const FAVORITES_KEY = 'pokemon-explorer-favorites'
 
-async function fetchPokemonList(limit = 10, offset = 0) {
-  const res = await fetch(`${API_BASE}/pokemon?limit=${limit}&offset=${offset}`)
-  return await res.json()
+async function getPokemon(url) {
+  const response = await fetch(url)
+  if (!response.ok) throw new Error('Unable to load Pokémon')
+  return response.json()
 }
 
-async function fetchPokemonDetail(urlOrName) {
-  const url = urlOrName.startsWith('http') ? urlOrName : `${API_BASE}/pokemon/${urlOrName}`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error('Not found')
-  return await res.json()
-}
-
-async function fetchAllPokemon() {
-  const res = await fetch(`${API_BASE}/pokemon?limit=1000`)
-  const data = await res.json()
-  return data.results
-}
-
-export default function PokemonList({ initialType }) {
-  const [pokemons, setPokemons] = useState([])
+export default function PokemonList() {
+  const [pokemon, setPokemon] = useState([])
   const [loading, setLoading] = useState(true)
-  const [limit] = useState(50)
-  const [offset, setOffset] = useState(0)
+  const [error, setError] = useState('')
   const [search, setSearch] = useState('')
+  const [type, setType] = useState('all')
+  const [sort, setSort] = useState('number')
+  const [favorites, setFavorites] = useState(() => JSON.parse(localStorage.getItem(FAVORITES_KEY) || '[]'))
+  const [favoritesOnly, setFavoritesOnly] = useState(false)
   const [selected, setSelected] = useState(null)
-  const [error, setError] = useState(null)
-  const [allPokemon, setAllPokemon] = useState([])
-  const [selectedType, setSelectedType] = useState(null)
-  const [showMoreTypes, setShowMoreTypes] = useState(false)
-
-  const load = async (nextOffset = 0, replace = false, type = null) => {
-    setLoading(true)
-    try {
-      if (type) {
-        const res = await fetch(`${API_BASE}/type/${type}`)
-        const data = await res.json()
-        const pokemonUrls = data.pokemon.map(p => p.pokemon.url)
-        const urls = pokemonUrls.slice(nextOffset, nextOffset + limit)
-        const details = await Promise.all(urls.map(url => fetchPokemonDetail(url)))
-        setPokemons((prev) => (replace ? details : [...prev, ...details]))
-        setOffset(nextOffset + limit)
-      } else {
-        const data = await fetchPokemonList(limit, nextOffset)
-        const details = await Promise.all(data.results.map((r) => fetchPokemonDetail(r.url)))
-        setPokemons((prev) => (replace ? details : [...prev, ...details]))
-        setOffset(nextOffset + limit)
-      }
-    } catch (err) {
-      console.error(err)
-      setError('Failed to load Pokémon')
-    } finally {
-      setLoading(false)
-    }
-  }
 
   useEffect(() => {
-    const init = async () => {
-      await load(0, true)
-      const all = await fetchAllPokemon()
-      setAllPokemon(all)
-    }
-    init()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let active = true
+    getPokemon(`${API}/pokemon?limit=151`).then((data) => Promise.all(data.results.map((item) => getPokemon(item.url))))
+      .then((data) => active && setPokemon(data))
+      .catch(() => active && setError('We could not load the Pokédex. Please try again.'))
+      .finally(() => active && setLoading(false))
+    return () => { active = false }
   }, [])
 
   useEffect(() => {
-    if (initialType !== undefined) {
-      setSelectedType(initialType)
-      load(0, true, initialType)
-    }
-  }, [initialType])
+    localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites))
+  }, [favorites])
 
-  const handleSearch = async (e) => {
-    e.preventDefault()
-    if (!search) {
-      // clear search
-      setPokemons([])
-      load(0, true)
-      return
-    }
-
-    setLoading(true)
-    try {
-      const matches = allPokemon.filter(p => p.name.includes(search.toLowerCase())).slice(0, 10)
-      if (matches.length === 0) {
-        setError('No Pokémon found')
-        setPokemons([])
-      } else {
-        const details = await Promise.all(matches.map(m => fetchPokemonDetail(m.url)))
-        setPokemons(details)
-        setError(null)
-      }
-    } catch (err) {
-      console.error(err)
-      setError('Failed to search')
-      setPokemons([])
-    } finally {
-      setLoading(false)
-    }
-  }
+  const toggleFavorite = (id) => setFavorites((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
+  const visiblePokemon = useMemo(() => pokemon
+    .filter((item) => !favoritesOnly || favorites.includes(item.id))
+    .filter((item) => type === 'all' || item.types.some((entry) => entry.type.name === type))
+    .filter((item) => item.name.includes(search.trim().toLowerCase()))
+    .sort((a, b) => sort === 'name' ? a.name.localeCompare(b.name) : sort === 'stats' ? b.stats.reduce((sum, stat) => sum + stat.base_stat, 0) - a.stats.reduce((sum, stat) => sum + stat.base_stat, 0) : a.id - b.id), [pokemon, search, type, sort, favoritesOnly, favorites])
 
   return (
-    <div>
-      <form onSubmit={handleSearch} className="mb-6 flex flex-col sm:flex-row gap-2">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by name (partial ok, e.g. venu)"
-          className="flex-1 p-2 rounded bg-slate-700 text-white outline-none"
-        />
-        <button className="px-4 bg-yellow-400 text-slate-900 rounded">Search</button>
-      </form>
-
-      <div className="mb-6 flex gap-1 sm:gap-2 flex-wrap">
-        <button
-          onClick={() => setSelectedType(null)}
-          className={`px-2 sm:px-3 py-1 rounded text-sm sm:text-base ${selectedType === null ? 'bg-yellow-400 text-slate-900' : 'bg-slate-600 text-white'}`}
-        >
-          All
-        </button>
-        {['normal', 'fire', 'water', 'grass', 'flying', 'fighting', 'poison', 'electric'].map(type => (
-          <button
-            key={type}
-            onClick={() => setSelectedType(type)}
-            className={`px-2 sm:px-3 py-1 rounded text-sm sm:text-base capitalize ${selectedType === type ? 'bg-yellow-400 text-slate-900' : 'bg-slate-600 text-white'}`}
-          >
-            {type}
-          </button>
-        ))}
-        {!showMoreTypes && (
-          <button
-            onClick={() => setShowMoreTypes(true)}
-            className="px-2 sm:px-3 py-1 rounded text-sm sm:text-base bg-indigo-600 text-white hover:bg-indigo-700"
-          >
-            More
-          </button>
-        )}
-        {showMoreTypes && ['ground', 'rock', 'psychic', 'ice', 'bug', 'ghost', 'steel', 'dragon', 'dark', 'fairy'].map(type => (
-          <button
-            key={type}
-            onClick={() => setSelectedType(type)}
-            className={`px-2 sm:px-3 py-1 rounded text-sm sm:text-base capitalize ${selectedType === type ? 'bg-yellow-400 text-slate-900' : 'bg-slate-600 text-white'}`}
-          >
-            {type}
-          </button>
-        ))}
-      </div>
-
-      {error && <div className="text-red-400 mb-4">{error}</div>}
-
-      {loading && pokemons.length === 0 ? (
-        <div className="text-center">Loading Pokédex...</div>
-      ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
-          {pokemons.filter(p => !selectedType || p.types.some(t => t.type.name === selectedType)).map((p) => (
-            <PokemonCard key={p.id} pokemon={p} onSelect={(pok) => setSelected(pok)} />
-          ))}
-        </div>
-      )}
-
-        <div className="mt-6 flex justify-center">
-          <button
-            onClick={pokemons.length >= 200 ? () => setPokemons(pokemons.slice(0, 50)) : () => load(offset, false, selectedType)}
-            className="px-4 py-2 bg-yellow-400 text-slate-900 rounded"
-            disabled={loading}
-          >
-            {loading ? 'Loading...' : pokemons.length >= 200 ? 'See less' : 'Load more'}
-          </button>
-        </div>
-
-      {selected && (
-        <PokemonDetail
-          pokemon={selected}
-          onClose={() => setSelected(null)}
-        />
-      )}
-    </div>
+    <main className="pokedex">
+      <section className="hero">
+        <div><p className="eyebrow">Kanto collection · 001—151</p><h1>Find your next <span>favorite.</span></h1><p>Browse the original Pokédex and learn something new.</p></div>
+        <div className="hero-ball" aria-hidden="true"><div /></div>
+      </section>
+      <section className="toolbar" aria-label="Pokémon filters">
+        <label className="search-box"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search Pokémon..." aria-label="Search Pokémon" /></label>
+        <select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort Pokémon"><option value="number">Pokédex number</option><option value="name">Name A–Z</option><option value="stats">Total stats</option></select>
+        <button className={`favorite-toggle ${favoritesOnly ? 'active' : ''}`} onClick={() => setFavoritesOnly(!favoritesOnly)}>♥ Favorites <b>{favorites.length}</b></button>
+      </section>
+      <div className="type-scroller">{TYPES.map((item) => <button key={item} className={`type-filter type-${item} ${type === item ? 'active' : ''}`} onClick={() => setType(item)}>{item === 'all' ? 'All types' : item}</button>)}</div>
+      {error && <div className="empty-state"><h2>Oops!</h2><p>{error}</p><button className="primary-button" onClick={() => window.location.reload()}>Try again</button></div>}
+      {loading && <div className="card-grid">{Array.from({ length: 12 }, (_, index) => <div className="skeleton-card" key={index}><div className="skeleton-image" /><div className="skeleton-line" /><div className="skeleton-line short" /></div>)}</div>}
+      {!loading && !error && visiblePokemon.length === 0 && <div className="empty-state"><div className="empty-ball">◓</div><h2>No Pokémon here yet</h2><p>Try a different search or filter, Trainer.</p><button className="secondary-button" onClick={() => { setSearch(''); setType('all'); setFavoritesOnly(false) }}>Clear filters</button></div>}
+      {!loading && !error && visiblePokemon.length > 0 && <div className="card-grid">{visiblePokemon.map((item) => <PokemonCard key={item.id} pokemon={item} favorite={favorites.includes(item.id)} onFavorite={() => toggleFavorite(item.id)} onSelect={setSelected} />)}</div>}
+      {selected && <PokemonDetail pokemon={selected} onClose={() => setSelected(null)} />}
+    </main>
   )
 }
